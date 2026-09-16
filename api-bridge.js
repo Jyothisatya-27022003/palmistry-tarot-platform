@@ -163,7 +163,69 @@ window.updateAdminConsole = async function () {
 };
 
 window.updateReaderConsole = async function () {
-  try { const data = await aetheriaApi('/analytics/reader'); document.getElementById('reader-queue-table-body').innerHTML = data.recent_readings.map(r => `<tr class="border-b border-mystic-900"><td class="p-3 font-mono">TRT-${r.id}</td><td class="p-3">User ${r.user_id}</td><td class="p-3">${r.spread_name}</td><td class="p-3">${new Date(r.created_at).toLocaleDateString()}</td><td class="p-3 text-right">—</td></tr>`).join(''); } catch (err) { addAuditLog(`Reader analytics unavailable: ${err.message}`); }
+  try {
+    const data = await aetheriaApi('/analytics/reader');
+
+    // Preserve the existing queue and deck chart; only feed them persisted backend data.
+    const queue = document.getElementById('reader-queue-table-body');
+    if (queue) {
+      queue.innerHTML = data.recent_readings.length
+        ? data.recent_readings.map(r => `<tr class="border-b border-mystic-900"><td class="p-3 font-mono">TRT-${r.id}</td><td class="p-3">User ${r.user_id}</td><td class="p-3">${r.spread_name}</td><td class="p-3">${new Date(r.created_at).toLocaleDateString()}</td><td class="p-3 text-right">—</td></tr>`).join('')
+        : '<tr><td colspan="5" class="p-4 text-center text-gray-500">Divination queue is currently empty.</td></tr>';
+    }
+
+    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.innerText = value; };
+    setText('reader-kpi-readings', data.reading_count);
+    setText('reader-kpi-clients', data.client_count);
+    setText('reader-kpi-30d', data.readings_30d);
+    setText('reader-kpi-score', data.average_guidance_score == null ? '—' : data.average_guidance_score);
+    setText('reader-engagement-repeat', data.repeat_client_count);
+    setText('reader-engagement-repeat-rate', `${data.repeat_client_rate}%`);
+    setText('reader-engagement-average', data.average_readings_per_client == null ? '—' : data.average_readings_per_client);
+    setText('reader-engagement-days', data.active_days_30d);
+    const latest = document.getElementById('reader-latest-session');
+    if (latest) latest.innerText = `Latest session: ${data.latest_session_at ? new Date(data.latest_session_at).toLocaleString() : '—'}`;
+    setText('reader-report-ready-count', `${data.report_ready_count} reports ready`);
+
+    // Session tracking / report management uses only persisted reading records.
+    const sessions = document.getElementById('reader-session-table-body');
+    if (sessions) {
+      sessions.innerHTML = data.recent_readings.length
+        ? data.recent_readings.map(r => `
+          <tr class="border-b border-mystic-900 hover:bg-mystic-900/20">
+            <td class="p-3 font-mono text-white">TRT-${r.id}</td>
+            <td class="p-3">User ${r.user_id}</td>
+            <td class="p-3 text-gray-300">${r.spread_name}</td>
+            <td class="p-3 text-gray-400">${r.focus_intent || 'General'}</td>
+            <td class="p-3">${new Date(r.created_at).toLocaleString()}</td>
+            <td class="p-3">${r.report_ready ? '<span class="text-green-400">Ready</span>' : '<span class="text-gray-500">Pending</span>'}</td>
+          </tr>`).join('')
+        : '<tr><td colspan="6" class="p-4 text-center text-gray-500">No persisted Tarot sessions found.</td></tr>';
+    }
+
+    const activityCanvas = document.getElementById('readerActivityChart');
+    if (activityCanvas && typeof Chart !== 'undefined') {
+      if (window.readerActivityChartObj) window.readerActivityChartObj.destroy();
+      window.readerActivityChartObj = new Chart(activityCanvas.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels: data.readings_by_day.map(r => r.date.slice(5)),
+          datasets: [{ label: 'Tarot readings', data: data.readings_by_day.map(r => r.count), tension: 0.35, fill: true }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }, plugins: { legend: { display: false } } }
+      });
+    }
+
+    // Update the existing deck chart from the backend's persisted card distribution.
+    if (typeof readerChartObj !== 'undefined') {
+      const ctx = document.getElementById('readerChart')?.getContext('2d');
+      if (ctx) {
+        if (readerChartObj) readerChartObj.destroy();
+        const labels = ['Major Arcana', 'Cups', 'Wands', 'Swords', 'Pentacles'];
+        readerChartObj = new Chart(ctx, { type: 'doughnut', data: { labels, datasets: [{ data: labels.map(k => data.category_breakdown[k] || 0), backgroundColor: ['#8b5cf6', '#3b82f6', '#ef4444', '#10b981', '#fbbf24'], borderWidth: 0 }] }, options: { plugins: { legend: { display: false } } } });
+      }
+    }
+  } catch (err) { addAuditLog(`Reader analytics unavailable: ${err.message}`); }
 };
 window.updateConsultantConsole = async function () {
   try {
